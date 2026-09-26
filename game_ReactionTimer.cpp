@@ -2,34 +2,28 @@
 #include <stdlib.h>
 #include <time.h>
 
-#ifdef _WIN32
-#include <windows.h>
-double now_ms(void) {
-    LARGE_INTEGER f, t;
-    QueryPerformanceFrequency(&f);
-    QueryPerformanceCounter(&t);
-    return (double)t.QuadPart * 1000.0 / (double)f.QuadPart;
-}
-void sleep_ms(int ms) { Sleep(ms); }
-#else
-#include <unistd.h>
-double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
-}
-void sleep_ms(int ms) { usleep(ms * 1000); }
-#endif
-
 void clearInput(void) {
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
 }
 
+void waitRandom(int minMs, int maxMs) {
+    int waitMs = minMs + rand() % (maxMs - minMs);
+    clock_t startTime = clock();
+    while (((clock() - startTime) * 1000 / CLOCKS_PER_SEC) < waitMs);
+}
+
 int main(void) {
-    int choice, rounds = 0, i, played = 0;
-    int score, totalScore = 0;
-    double ms, times[20], best, worst, sum, avg, range, t1, t2;
+    int choice, rounds = 0, i, played = 0, streak = 0, bestStreak = 0;
+    int score, totalScore = 0, diff = 2;
+    int minWait[3] = {2000, 1000, 400};
+    int maxWait[3] = {4000, 3000, 1500};
+    int lightning[3] = {200, 150, 100};
+    int sharp[3]     = {400, 300, 200};
+    int steady[3]    = {650, 500, 350};
+    int slow[3]      = {1000, 900, 600};
+    double ms, times[20], best, worst, sum, avg, range;
+    clock_t t1, t2;
 
     srand((unsigned)time(NULL));
 
@@ -37,8 +31,9 @@ int main(void) {
         printf("\n===== REACTION TIMER =====\n");
         printf("1. Play rounds\n");
         printf("2. View stats\n");
-        printf("3. Reset session\n");
-        printf("4. Exit\n");
+        printf("3. Change difficulty (now: %s)\n", diff == 1 ? "Easy" : diff == 2 ? "Normal" : "Hard");
+        printf("4. Reset session\n");
+        printf("5. Exit\n");
         printf("Choice: ");
         if (scanf("%d", &choice) != 1) { clearInput(); choice = 0; continue; }
         clearInput();
@@ -62,37 +57,46 @@ int main(void) {
 
                     printf("\nRound %d - get ready...\n", played + 1);
                     fflush(stdout);
-                    sleep_ms(1000 + rand() % 3000);
+                    waitRandom(minWait[diff - 1], maxWait[diff - 1]);
 
                     printf(">>> PRESS ENTER NOW! <<<\n");
                     fflush(stdout);
 
-                    t1 = now_ms();
+                    t1 = clock();
                     clearInput();
-                    t2 = now_ms();
+                    t2 = clock();
 
-                    ms = t2 - t1;
+                    ms = (double)(t2 - t1) * 1000.0 / CLOCKS_PER_SEC;
                     times[played] = ms;
 
-                    if (ms < 150) {
-                        if (ms < 100) score = 120;
-                        else score = 100;
+                    if (ms < lightning[diff - 1]) {
+                        score = 120;
                         printf("Lightning fast! %.0f ms\n", ms);
-                    } else if (ms < 300) {
-                        if (ms < 220) score = 80;
-                        else score = 65;
+                        streak++;
+                    } else if (ms < sharp[diff - 1]) {
+                        score = 80;
                         printf("Sharp. %.0f ms\n", ms);
-                    } else if (ms < 500) {
-                        if (ms < 400) score = 45;
-                        else score = 30;
+                        streak++;
+                    } else if (ms < steady[diff - 1]) {
+                        score = 45;
                         printf("Steady. %.0f ms\n", ms);
-                    } else if (ms < 900) {
+                        streak = 0;
+                    } else if (ms < slow[diff - 1]) {
                         score = 15;
                         printf("A bit slow. %.0f ms\n", ms);
+                        streak = 0;
                     } else {
                         score = 5;
                         printf("Drifted off? %.0f ms\n", ms);
+                        streak = 0;
                     }
+
+                    if (streak >= 3) {
+                        int bonus = 20;
+                        score += bonus;
+                        printf("Streak x%d! Bonus +%d\n", streak, bonus);
+                    }
+                    if (streak > bestStreak) bestStreak = streak;
 
                     totalScore += score;
                     played++;
@@ -116,11 +120,12 @@ int main(void) {
                     range = worst - best;
 
                     printf("\n--- SESSION STATS ---\n");
-                    printf("Rounds   : %d\n", played);
-                    printf("Best     : %.0f ms\n", best);
-                    printf("Worst    : %.0f ms\n", worst);
-                    printf("Average  : %.0f ms\n", avg);
-                    printf("Score    : %d\n", totalScore);
+                    printf("Rounds       : %d\n", played);
+                    printf("Best         : %.0f ms\n", best);
+                    printf("Worst        : %.0f ms\n", worst);
+                    printf("Average      : %.0f ms\n", avg);
+                    printf("Best streak  : %d\n", bestStreak);
+                    printf("Score        : %d\n", totalScore);
 
                     if (range < 80) {
                         if (avg < 250) printf("Consistency: locked in\n");
@@ -135,19 +140,28 @@ int main(void) {
                 break;
 
             case 3:
-                played = 0;
-                totalScore = 0;
-                printf("Session reset.\n");
+                printf("Select difficulty - 1.Easy 2.Normal 3.Hard: ");
+                if (scanf("%d", &diff) != 1 || diff < 1 || diff > 3) diff = 2;
+                clearInput();
+                printf("Difficulty set. Hard = shorter wait + tighter timing to score well. Easy = longer wait + looser timing.\n");
                 break;
 
             case 4:
+                played = 0;
+                totalScore = 0;
+                streak = 0;
+                bestStreak = 0;
+                printf("Session reset.\n");
+                break;
+
+            case 5:
                 printf("Final score: %d\n", totalScore);
                 break;
 
             default:
                 printf("Invalid option.\n");
         }
-    } while (choice != 4);
+    } while (choice != 5);
 
     return 0;
 }
